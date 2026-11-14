@@ -49,6 +49,39 @@
 #define DPC_PIPE_BUSY REG32(DPC_BASE + 0x18)
 #define DPC_TMEM_BUSY REG32(DPC_BASE + 0x1C)
 
+#define SI_BASE 0xA4800000
+#define SI_DRAM_ADDR      REG32(SI_BASE)
+#define SI_PIF_ADDR_RD64B REG32(SI_BASE + 0x04)
+#define SI_PIF_ADDR_WR64B REG32(SI_BASE + 0x10)
+
+#define PIF_BASE 0xBFC00000
+#define PIF_RAM_START (PIF_BASE + 0x7C0)
+
+static uint32_t PIF_Init[] = {
+	0xFF010401, 0, // controller 1
+	0, 0,          // controller 2
+	0, 0,          // controller 3
+	0, 0,          // controller 4
+	0xFE000000, 0, // controller end
+	0, 0,
+	0, 0,
+	0, 1,          // end with 1 = status register
+};
+
+static uint32_t PIF_JoyState[16];
+
+void init_joypad(void)
+{
+	SI_DRAM_ADDR = PHYSADDR(PIF_Init);
+	SI_PIF_ADDR_WR64B = PHYSADDR(PIF_RAM_START);
+}
+
+void read_joypad(void)
+{
+	SI_DRAM_ADDR = PHYSADDR(PIF_JoyState);
+	SI_PIF_ADDR_RD64B = PHYSADDR(PIF_RAM_START);
+}
+
 void wait_scanline(uint32_t v)
 {
 	while (VI_V_CURRENT_LINE != v) {}
@@ -84,6 +117,7 @@ static void vi_init(void)
 void main(void)
 {
 	vi_init();
+	init_joypad();
 	wait_scanline(0x200);
 
 	// hardcode some RDP commands
@@ -103,5 +137,9 @@ void main(void)
 
 	*(volatile uint32_t*)ISSOU = 0x155E;
 
-	for (;;) {}
+	for (;;) {
+		wait_scanline(0x200);
+
+		read_joypad();
+	}
 }
