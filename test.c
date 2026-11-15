@@ -3,7 +3,8 @@
 #define SCREEN_W 320
 #define SCREEN_H 240
 
-#define PHYSADDR(a) ((uint32_t)(a) & 0X1FFFFFFF)
+#define PHYSADDR(a) ((uint32_t)(a) & 0x1FFFFFFF)
+#define VIRTADDR(a) ((uint32_t)(a) | 0xA0000000)
 
 #define REG32(a) (*(volatile uint32_t *)(a))
 
@@ -128,8 +129,14 @@ void main(void)
 			0x3f10013f, 0x00100000, // Set_Color_Image
 			0x37000000, 0xf83ff83f, // Set_Fill_Color
 			0x364fc3bc, 0x00000000, // Fill_Rectangle
+			0x37000000, 0x4bb54bb5, // Set_Fill_Color
+			0x00000000, 0x00000000, // Fill_Rectangle placeholder (NOOP)
 			0x29000000, 0x00000000, // Sync_Full
 		};
+
+		uint32_t va1 = VIRTADDR(&command_buffer[12]);
+		uint32_t va2 = VIRTADDR(&command_buffer[13]);
+		*(volatile uint32_t*)va1 = 0x364fc3bc;
 
 		DPC_START = PHYSADDR(command_buffer);
 		DPC_END = PHYSADDR(command_buffer) + sizeof(command_buffer);
