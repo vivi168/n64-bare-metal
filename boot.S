@@ -18,6 +18,11 @@ _start:
 	addiu $t0, $t0, %lo(__bss_start)
 	lui $t1, %hi(__bss_end)
 	addiu $t1, $t1, %lo(__bss_end)
+
+	/* uncached addresses (via KSEG1) */
+	lui $t2, 0xA000
+	or  $t0, $t0, $t2
+	or  $t1, $t1, $t2
 clear_bss:
 	beq $t0, $t1, bss_cleared
 	nop
