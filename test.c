@@ -115,6 +115,24 @@ static void vi_init(void)
 	VI_Y_SCALE = 256 * SCREEN_H / 60;
 }
 
+void RDP_FillRectangle(uint32_t* cmd_list_dest, uint32_t x, uint32_t y, uint32_t width, uint32_t height)
+{
+	// top left corner, u10.2
+	uint32_t xh = (x << 2) & 0xfff;
+	uint32_t yh = (y << 2) & 0xfff;
+	// top right corner, u10.2
+	uint32_t xl = ((x + width) << 2) & 0xfff;
+	uint32_t yl = ((y + height) << 2) & 0xfff;
+
+	uint32_t hi = (0x36 << 24) | (xl << 12) | yl;
+	uint32_t lo = (xh << 12) | yh;
+
+	uint32_t addr = VIRTADDR(cmd_list_dest);
+
+	*(volatile uint32_t*)addr = hi;
+	*(volatile uint32_t*)(addr + 4) = lo;
+}
+
 void main(void)
 {
 	vi_init();
@@ -125,7 +143,7 @@ void main(void)
 	{
 		static _Alignas(8) uint32_t command_buffer[] = {
 			0x2D000000, 0x005003c0, // Set_Scissor
-			0x2f300000, 0x00000000, // Set_Other_Modes
+			0x2f300000, 0x00000000, // Set_Other_Modes. bit 52-53 = cycle type
 			0x3f10013f, 0x00100000, // Set_Color_Image
 			0x37000000, 0xf83ff83f, // Set_Fill_Color
 			0x364fc3bc, 0x00000000, // Fill_Rectangle
@@ -134,9 +152,8 @@ void main(void)
 			0x29000000, 0x00000000, // Sync_Full
 		};
 
-		uint32_t va1 = VIRTADDR(&command_buffer[12]);
-		uint32_t va2 = VIRTADDR(&command_buffer[13]);
-		*(volatile uint32_t*)va1 = 0x364fc3bc;
+		// in cycle_type = FILL and COPY modes, bot right corner coords are inclusive, so -1
+		RDP_FillRectangle(&command_buffer[12], 320/2 - 16, 240/2 - 16, 32 - 1, 32 - 1);
 
 		DPC_START = PHYSADDR(command_buffer);
 		DPC_END = PHYSADDR(command_buffer) + sizeof(command_buffer);
