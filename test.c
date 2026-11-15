@@ -58,6 +58,10 @@
 #define PIF_BASE 0xBFC00000
 #define PIF_RAM_START (PIF_BASE + 0x7C0)
 
+#define MI_BASE 0xA4300000
+#define MI_INTR REG32(MI_BASE + 0x08)
+#define MI_INTR_VI 0x08
+
 static uint32_t PIF_Init[] = {
 	0xFF010401, 0, // controller 1
 	0, 0,          // controller 2
@@ -71,13 +75,37 @@ static uint32_t PIF_Init[] = {
 
 static uint32_t PIF_JoyState[16];
 
+struct JoyState
+{
+    uint32_t a : 1;
+    uint32_t b : 1;
+    uint32_t z : 1;
+    uint32_t start : 1;
+    uint32_t d_up : 1;
+    uint32_t d_down: 1;
+    uint32_t d_left : 1;
+    uint32_t d_right : 1;
+
+    uint32_t reset : 1;
+    uint32_t unused : 1;
+    uint32_t l : 1;
+    uint32_t r : 1;
+    uint32_t c_up : 1;
+    uint32_t c_down: 1;
+    uint32_t c_left : 1;
+    uint32_t c_right : 1;
+
+    int32_t x_axis : 8;
+    int32_t y_axis : 8;
+};
+
 void init_joypad(void)
 {
 	SI_DRAM_ADDR = PHYSADDR(PIF_Init);
 	SI_PIF_ADDR_WR64B = PHYSADDR(PIF_RAM_START);
 }
 
-void read_joypad(void)
+void poll_joypad(void)
 {
 	SI_DRAM_ADDR = PHYSADDR(PIF_JoyState);
 	SI_PIF_ADDR_RD64B = PHYSADDR(PIF_RAM_START);
@@ -86,6 +114,13 @@ void read_joypad(void)
 void wait_scanline(uint32_t v)
 {
 	while (VI_V_CURRENT_LINE != v) {}
+}
+
+static void wait_vsync(void)
+{
+    while (!(MI_INTR & MI_INTR_VI)) {}
+
+	VI_V_CURRENT_LINE = 0; // acknowledge by writing to it
 }
 
 static void vi_init(void)
@@ -139,31 +174,65 @@ void main(void)
 	init_joypad();
 	wait_scanline(0x200);
 
-	// hardcode some RDP commands
-	{
-		static _Alignas(8) uint32_t command_buffer[] = {
-			0x2D000000, 0x005003c0, // Set_Scissor
-			0x2f300000, 0x00000000, // Set_Other_Modes. bit 52-53 = cycle type
-			0x3f10013f, 0x00100000, // Set_Color_Image
-			0x37000000, 0xf83ff83f, // Set_Fill_Color
-			0x364fc3bc, 0x00000000, // Fill_Rectangle
-			0x37000000, 0x4bb54bb5, // Set_Fill_Color
-			0x00000000, 0x00000000, // Fill_Rectangle placeholder (NOOP)
-			0x29000000, 0x00000000, // Sync_Full
-		};
+	*(volatile uint32_t*)ISSOU = sizeof(struct JoyState);
 
-		// in cycle_type = FILL and COPY modes, bot right corner coords are inclusive, so -1
-		RDP_FillRectangle(&command_buffer[12], 320/2 - 16, 240/2 - 16, 32 - 1, 32 - 1);
-
-		DPC_START = PHYSADDR(command_buffer);
-		DPC_END = PHYSADDR(command_buffer) + sizeof(command_buffer);
-	}
-
-	*(volatile uint32_t*)ISSOU = 0x155E;
+	int32_t rx = SCREEN_W/2 - 16;
+	int32_t ry = SCREEN_H/2 - 16;
+	const uint32_t rw = 32 - 1;
+	const uint32_t rh = 32 - 1;
 
 	for (;;) {
-		wait_scanline(0x200);
+		wait_vsync();
 
-		read_joypad();
+		poll_joypad();
+
+		// PIF_JoyState is written via DMA so we must read the uncached version (via KSEG1)
+		uint32_t raw = ((volatile uint32_t *)VIRTADDR(PIF_JoyState))[1];
+		struct JoyState js = *(struct JoyState *)&raw;
+		if (js.d_up) {
+			ry--;
+		}
+		if (js.d_down) {
+			ry++;
+		}
+		if (js.d_right) {
+			rx++;
+		}
+		if (js.d_left) {
+			rx--;
+		}
+
+		if (rx < 0) {
+			rx = 0;
+		}
+		if (rx > (int32_t)(SCREEN_W - rw)) {
+			rx = SCREEN_W - rw;
+		}
+		if (ry < 0) {
+			ry = 0;
+		}
+		if (ry > (int32_t)(SCREEN_H - rh)) {
+			ry = SCREEN_H - rh;
+		}
+
+		// hardcode some RDP commands
+		{
+			static _Alignas(8) uint32_t command_buffer[] = {
+				0x2D000000, 0x005003c0, // Set_Scissor
+				0x2f300000, 0x00000000, // Set_Other_Modes. bit 52-53 = cycle type
+				0x3f10013f, 0x00100000, // Set_Color_Image
+				0x37000000, 0xf83ff83f, // Set_Fill_Color
+				0x364fc3bc, 0x00000000, // Fill_Rectangle
+				0x37000000, 0x4bb54bb5, // Set_Fill_Color
+				0x00000000, 0x00000000, // Fill_Rectangle placeholder (NOOP)
+				0x29000000, 0x00000000, // Sync_Full
+			};
+
+			// in cycle_type = FILL and COPY modes, bot right corner coords are inclusive, so -1
+			RDP_FillRectangle(&command_buffer[12], rx, ry, rw, rh);
+
+			DPC_START = PHYSADDR(command_buffer);
+			DPC_END = PHYSADDR(command_buffer) + sizeof(command_buffer);
+		}
 	}
 }
