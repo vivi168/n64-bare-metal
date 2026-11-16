@@ -168,6 +168,11 @@ void RDP_FillRectangle(uint32_t* cmd_list_dest, uint32_t x, uint32_t y, uint32_t
 	*(volatile uint32_t*)(addr + 4) = lo;
 }
 
+// FPU test
+float ronre(float i, float j) {
+	return i * j;
+}
+
 void main(void)
 {
 	vi_init();
@@ -180,6 +185,9 @@ void main(void)
 	int32_t ry = SCREEN_H/2 - 16;
 	const uint32_t rw = 32 - 1;
 	const uint32_t rh = 32 - 1;
+
+	float rire = ronre(13.37f, 26.52f);
+	*(volatile uint32_t *)ISSOU = *(uint32_t *) &rire;
 
 	for (;;) {
 		wait_vsync();
