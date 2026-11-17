@@ -179,10 +179,10 @@ void RDP_FillRectangle(uint32_t* cmd_list_dest, uint32_t x, uint32_t y, uint32_t
 	uint32_t hi = (0x36 << 24) | (xl << 12) | yl;
 	uint32_t lo = (xh << 12) | yh;
 
-	uint32_t addr = VIRTADDR(cmd_list_dest);
+	volatile uint32_t *p = (volatile uint32_t *)VIRTADDR(cmd_list_dest);
 
-	*(volatile uint32_t*)addr = hi;
-	*(volatile uint32_t*)(addr + 4) = lo;
+	p[0] = hi;
+	p[1] = lo;
 }
 
 // FPU test
@@ -212,18 +212,17 @@ void main(void)
 		poll_joypad();
 
 		// PIF_JoyState is written via DMA so we must read the uncached version (via KSEG1)
-		uint32_t raw = ((volatile uint32_t *)VIRTADDR(PIF_JoyState))[1];
-		struct JoyState js = *(struct JoyState *)&raw;
-		if (js.d_up) {
+		volatile struct JoyState *js = (volatile struct JoyState *)VIRTADDR(&PIF_JoyState[1]);
+		if (js->d_up) {
 			ry--;
 		}
-		if (js.d_down) {
+		if (js->d_down) {
 			ry++;
 		}
-		if (js.d_right) {
+		if (js->d_right) {
 			rx++;
 		}
-		if (js.d_left) {
+		if (js->d_left) {
 			rx--;
 		}
 
