@@ -6,7 +6,7 @@
 #define PHYSADDR(a) ((uint32_t)(a) & 0x1FFFFFFF)
 #define VIRTADDR(a) ((uint32_t)(a) | 0xA0000000)
 
-#define REG32(a) (*(volatile uint32_t *)(a))
+#define REG32(a) ((volatile uint32_t *)(a))
 
 #define ISSOU 0xA00FFFF0
 
@@ -108,37 +108,37 @@ struct JoyState
 
 static void si_wait(void)
 {
-    while (SI_STATUS & (SI_DMA_BUSY | SI_IO_BUSY)) {}
+    while (*SI_STATUS & (SI_DMA_BUSY | SI_IO_BUSY)) {}
 
-    SI_STATUS = SI_CLEAR_INTERRUPT;
+    *SI_STATUS = SI_CLEAR_INTERRUPT;
 }
 
 void init_joypad(void)
 {
-	SI_DRAM_ADDR = PHYSADDR(PIF_Init);
-	SI_PIF_ADDR_WR64B = PHYSADDR(PIF_RAM_START);
+	*SI_DRAM_ADDR = PHYSADDR(PIF_Init);
+	*SI_PIF_ADDR_WR64B = PHYSADDR(PIF_RAM_START);
 
 	si_wait();
 }
 
 void poll_joypad(void)
 {
-	SI_DRAM_ADDR = PHYSADDR(PIF_JoyState);
-	SI_PIF_ADDR_RD64B = PHYSADDR(PIF_RAM_START);
+	*SI_DRAM_ADDR = PHYSADDR(PIF_JoyState);
+	*SI_PIF_ADDR_RD64B = PHYSADDR(PIF_RAM_START);
 
 	si_wait();
 }
 
 void wait_scanline(uint32_t v)
 {
-	while (VI_V_CURRENT_LINE != v) {}
+	while (*VI_V_CURRENT_LINE != v) {}
 }
 
 static void wait_vblank(void)
 {
-	while (!(MI_INTR & MI_INTR_VI)) {}
+	while (!(*MI_INTR & MI_INTR_VI)) {}
 
-	VI_V_CURRENT_LINE = 0; // acknowledge by writing to it
+	*VI_V_CURRENT_LINE = 0; // acknowledge by writing to it
 }
 
 static void vi_init(void)
@@ -151,20 +151,20 @@ static void vi_init(void)
 		VI_CTL_GAMMA_DITHER |
 		VI_CTL_TYPE_16BPP;
 
-	VI_STATUS = status;
-	VI_ORIGIN = 0xA0100000;
-	VI_WIDTH = SCREEN_W;
-	VI_V_INTR = 2;
-	VI_V_CURRENT_LINE = 0;
-	VI_TIMING = 0x3E52239;
-	VI_V_TOTAL = 0x20D; // V_TOTAL=525, for non-interlaced NTSC
-	VI_H_TOTAL = 0xC15; // H_TOTAL=3093 for NTSC
-	VI_H_TOTAL_LEAP = 0xC150C15;
-	VI_H_VIDEO = 0x6C02EC; // H_START=108, H_END=748 (typical NTSC values)
-	VI_V_VIDEO = 0x2501FF; // V_START=37, V_END=511 (typical NTSC values)
-	VI_V_BURST = 0xE0204; // V_BURST_START=14, V_BURST_END=516 (typical NTSC values)
-	VI_X_SCALE = 512; // X_SCALE=0.5 (2.10 format)
-	VI_Y_SCALE = 1024; // Y_SCALE=1 (2.10 format)
+	*VI_STATUS = status;
+	*VI_ORIGIN = 0xA0100000;
+	*VI_WIDTH = SCREEN_W;
+	*VI_V_INTR = 2;
+	*VI_V_CURRENT_LINE = 0;
+	*VI_TIMING = 0x3E52239;
+	*VI_V_TOTAL = 0x20D; // V_TOTAL=525, for non-interlaced NTSC
+	*VI_H_TOTAL = 0xC15; // H_TOTAL=3093 for NTSC
+	*VI_H_TOTAL_LEAP = 0xC150C15;
+	*VI_H_VIDEO = 0x6C02EC; // H_START=108, H_END=748 (typical NTSC values)
+	*VI_V_VIDEO = 0x2501FF; // V_START=37, V_END=511 (typical NTSC values)
+	*VI_V_BURST = 0xE0204; // V_BURST_START=14, V_BURST_END=516 (typical NTSC values)
+	*VI_X_SCALE = 512; // X_SCALE=0.5 (2.10 format)
+	*VI_Y_SCALE = 1024; // Y_SCALE=1 (2.10 format)
 }
 
 void RDP_FillRectangle(uint32_t* cmd_list_dest, uint32_t x, uint32_t y, uint32_t width, uint32_t height)
@@ -256,8 +256,8 @@ void main(void)
 			// in cycle_type = FILL and COPY modes, bot right corner coords are inclusive, so -1
 			RDP_FillRectangle(&command_buffer[12], rx, ry, rw, rh);
 
-			DPC_START = PHYSADDR(command_buffer);
-			DPC_END = PHYSADDR(command_buffer) + sizeof(command_buffer);
+			*DPC_START = PHYSADDR(command_buffer);
+			*DPC_END = PHYSADDR(command_buffer) + sizeof(command_buffer);
 		}
 	}
 }
