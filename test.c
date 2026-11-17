@@ -8,7 +8,7 @@
 
 #define REG32(a) (*(volatile uint32_t *)(a))
 
-#define ISSOU 0xA0001000
+#define ISSOU 0xA00FFFF0
 
 #define VI_BASE           0xA4400000
 #define VI_STATUS         REG32(VI_BASE)
@@ -17,9 +17,9 @@
 #define VI_V_INTR         REG32(VI_BASE + 0x0C)
 #define VI_V_CURRENT_LINE REG32(VI_BASE + 0x10)
 #define VI_TIMING         REG32(VI_BASE + 0x14)
-#define VI_V_SYNC         REG32(VI_BASE + 0x18)
-#define VI_H_SYNC         REG32(VI_BASE + 0x1C)
-#define VI_H_SYNC_LEAP    REG32(VI_BASE + 0x20)
+#define VI_V_TOTAL        REG32(VI_BASE + 0x18)
+#define VI_H_TOTAL        REG32(VI_BASE + 0x1C)
+#define VI_H_TOTAL_LEAP   REG32(VI_BASE + 0x20)
 #define VI_H_VIDEO        REG32(VI_BASE + 0x24)
 #define VI_V_VIDEO        REG32(VI_BASE + 0x28)
 #define VI_V_BURST        REG32(VI_BASE + 0x2C)
@@ -54,6 +54,13 @@
 #define SI_DRAM_ADDR      REG32(SI_BASE)
 #define SI_PIF_ADDR_RD64B REG32(SI_BASE + 0x04)
 #define SI_PIF_ADDR_WR64B REG32(SI_BASE + 0x10)
+#define SI_STATUS         REG32(SI_BASE + 0x18)
+
+#define SI_DMA_BUSY  (1 << 0)
+#define SI_IO_BUSY   (1 << 1)
+#define SI_DMA_ERROR (1 << 3)
+
+#define SI_CLEAR_INTERRUPT 0
 
 #define PIF_BASE 0xBFC00000
 #define PIF_RAM_START (PIF_BASE + 0x7C0)
@@ -62,7 +69,7 @@
 #define MI_INTR REG32(MI_BASE + 0x08)
 #define MI_INTR_VI 0x08
 
-static uint32_t PIF_Init[] = {
+static _Alignas(8) uint32_t PIF_Init[] = {
 	0xFF010401, 0, // controller 1
 	0, 0,          // controller 2
 	0, 0,          // controller 3
@@ -73,7 +80,7 @@ static uint32_t PIF_Init[] = {
 	0, 1,          // end with 1 = status register
 };
 
-static uint32_t PIF_JoyState[16];
+static _Alignas(8) uint32_t PIF_JoyState[16];
 
 struct JoyState
 {
@@ -99,16 +106,27 @@ struct JoyState
     int32_t y_axis : 8;
 };
 
+static void si_wait(void)
+{
+    while (SI_STATUS & (SI_DMA_BUSY | SI_IO_BUSY)) {}
+
+    SI_STATUS = SI_CLEAR_INTERRUPT;
+}
+
 void init_joypad(void)
 {
 	SI_DRAM_ADDR = PHYSADDR(PIF_Init);
 	SI_PIF_ADDR_WR64B = PHYSADDR(PIF_RAM_START);
+
+	si_wait();
 }
 
 void poll_joypad(void)
 {
 	SI_DRAM_ADDR = PHYSADDR(PIF_JoyState);
 	SI_PIF_ADDR_RD64B = PHYSADDR(PIF_RAM_START);
+
+	si_wait();
 }
 
 void wait_scanline(uint32_t v)
@@ -116,9 +134,9 @@ void wait_scanline(uint32_t v)
 	while (VI_V_CURRENT_LINE != v) {}
 }
 
-static void wait_vsync(void)
+static void wait_vblank(void)
 {
-    while (!(MI_INTR & MI_INTR_VI)) {}
+	while (!(MI_INTR & MI_INTR_VI)) {}
 
 	VI_V_CURRENT_LINE = 0; // acknowledge by writing to it
 }
@@ -134,20 +152,19 @@ static void vi_init(void)
 		VI_CTL_TYPE_16BPP;
 
 	VI_STATUS = status;
-	// FIXME: for now just blindly copied values from Peter Lemon HelloWorld example
-	VI_ORIGIN = 0x00100000;
+	VI_ORIGIN = 0xA0100000;
 	VI_WIDTH = SCREEN_W;
-	VI_V_INTR = 0x200;
-	VI_V_CURRENT_LINE = 0x0;
+	VI_V_INTR = 2;
+	VI_V_CURRENT_LINE = 0;
 	VI_TIMING = 0x3E52239;
-	VI_V_SYNC = 0x20D;
-	VI_H_SYNC = 0xC15;
-	VI_H_SYNC_LEAP = 0xC150C15;
-	VI_H_VIDEO = 0x6C02EC;
-	VI_V_VIDEO = 0x2501FF;
-	VI_V_BURST = 0xE0204;
-	VI_X_SCALE = 256 * SCREEN_W / 160;
-	VI_Y_SCALE = 256 * SCREEN_H / 60;
+	VI_V_TOTAL = 0x20D; // V_TOTAL=525, for non-interlaced NTSC
+	VI_H_TOTAL = 0xC15; // H_TOTAL=3093 for NTSC
+	VI_H_TOTAL_LEAP = 0xC150C15;
+	VI_H_VIDEO = 0x6C02EC; // H_START=108, H_END=748 (typical NTSC values)
+	VI_V_VIDEO = 0x2501FF; // V_START=37, V_END=511 (typical NTSC values)
+	VI_V_BURST = 0xE0204; // V_BURST_START=14, V_BURST_END=516 (typical NTSC values)
+	VI_X_SCALE = 512; // X_SCALE=0.5 (2.10 format)
+	VI_Y_SCALE = 1024; // Y_SCALE=1 (2.10 format)
 }
 
 void RDP_FillRectangle(uint32_t* cmd_list_dest, uint32_t x, uint32_t y, uint32_t width, uint32_t height)
@@ -175,9 +192,9 @@ float ronre(float i, float j) {
 
 void main(void)
 {
+	si_wait(); // acknowledge the interrupt emited by PIF initialize in boot.S
 	vi_init();
 	init_joypad();
-	wait_scanline(0x200);
 
 	*(volatile uint32_t*)ISSOU = sizeof(struct JoyState);
 
@@ -190,7 +207,7 @@ void main(void)
 	*(volatile uint32_t *)ISSOU = *(uint32_t *) &rire;
 
 	for (;;) {
-		wait_vsync();
+		wait_vblank();
 
 		poll_joypad();
 
