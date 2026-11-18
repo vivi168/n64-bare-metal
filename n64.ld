@@ -17,6 +17,7 @@ SECTIONS
 	ASSERT(SIZEOF(.n64_boot) == 0xFC0, "IPL3 boot code must be 4032 bytes")
 
 	. = 0x80000400;
+
 	.text : AT(0x1000)
 	{
 		KEEP(*(.text.entry))
@@ -30,17 +31,33 @@ SECTIONS
 
 	.data ALIGN(16) : AT(ALIGN(LOADADDR(.rodata) + SIZEOF(.rodata), 16))
 	{
+		__data_start = .;
+
 		*(.data .data.*)
+	}
+
+	.sdata ALIGN(16) : AT(ALIGN(LOADADDR(.data) + SIZEOF(.data), 16))
+	{
 		*(.sdata .sdata.*)
+
+		__data_end = .;
+	}
+
+	.sbss ALIGN(16) (NOLOAD) :
+	{
+		__bss_start = .;
+
+		*(.sbss .sbss.*)
+		*(.scommon)
 	}
 
 	.bss ALIGN(16) (NOLOAD) :
 	{
-		__bss_start = .;
 		*(.bss .bss.*)
-		*(.sbss .sbss.*)
 		*(COMMON)
-		__bss_end = ALIGN(., 4);
+
+		. = ALIGN(16);
+		__bss_end = .;
 	}
 
 	/DISCARD/ :

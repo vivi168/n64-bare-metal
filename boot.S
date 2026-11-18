@@ -4,12 +4,12 @@
 .type _start, @function
 
 _start:
-	/* PIF */
+	/* PIF init */
 	lui $a0, 0xBFC0
 	addiu $t0, $zero, 8
 	sw $t0, 0x07FC($a0)
 
-	/* set top of RDRAM as stack base */
+	/* set top of RDRAM (0x80400000) as stack base */
 	lui $sp, 0x8040
 	addiu $sp, $sp, -16
 
@@ -25,13 +25,17 @@ _start:
 	or  $t1, $t1, $t2
 clear_bss:
 	beq $t0, $t1, bss_cleared
-	nop
-	sw $zero, 0($t0)
-	addiu $t0, $t0, 4
+	addiu $t0, $t0, 4 /* delay slot */
+	sw $zero, -4($t0)
 	b clear_bss
 	nop
 
 bss_cleared:
+	/*
+	FIXME: BOOTCODE.BIN IPL3 already copies the first 1MiB from the ROM
+	(so for now we an avoid copying .data/.sdata manually)
+	*/
+
 	jal main
 	nop
 

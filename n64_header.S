@@ -1,8 +1,6 @@
-/* Adapted from Peter Lemon N64_HEADER.ASM */
-
 .section .n64_header, "a", @progbits
-.balign 4
 .global n64_header
+
 n64_header:
 	.word 0x80371240             /* PI BSB domain 1 timing */
 	.word 0x0000000F             /* clock rate */
