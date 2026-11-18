@@ -38,6 +38,8 @@ SECTIONS
 
 	.sdata ALIGN(16) : AT(ALIGN(LOADADDR(.data) + SIZEOF(.data), 16))
 	{
+		__gp = . + 0x7ff0;
+
 		*(.sdata .sdata.*)
 
 		__data_end = .;

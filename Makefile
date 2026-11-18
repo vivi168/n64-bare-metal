@@ -4,7 +4,7 @@ OBJCOPY := llvm-objcopy
 
 TARGET  := mips-unknown-elf
 CFLAGS  := --target=$(TARGET) -march=mips3 -mabi=32 -EB
-CFLAGS  += -ffreestanding -fno-builtin -fno-pic -mno-abicalls -G0
+CFLAGS  += -ffreestanding -fno-builtin -fno-pic -mno-abicalls -G8
 CFLAGS  += -O2 -g -Wall -Wextra
 LDFLAGS := -m elf32btsmip -T n64.ld
 

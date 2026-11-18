@@ -13,6 +13,9 @@ _start:
 	lui $sp, 0x8040
 	addiu $sp, $sp, -16
 
+	/* set  global pointer */
+	la $gp, __gp
+
 	/* clear bss */
 	lui $t0, %hi(__bss_start)
 	addiu $t0, $t0, %lo(__bss_start)
