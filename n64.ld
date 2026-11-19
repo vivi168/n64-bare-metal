@@ -3,25 +3,31 @@ ENTRY(_start)
 
 SECTIONS
 {
-	. = 0;
 	.n64_header : AT(0)
 	{
 		KEEP(*(.n64_header))
 	}
 	ASSERT(SIZEOF(.n64_header) == 0x40, "N64 header must be 64 bytes")
 
-	.n64_boot 0x40 : AT(0x40)
+	.n64_boot : AT(0x40)
 	{
 		KEEP(*(.n64_boot))
 	}
 	ASSERT(SIZEOF(.n64_boot) == 0xFC0, "IPL3 boot code must be 4032 bytes")
 
-	. = 0x80000400;
+	__ivt_ram_start = 0x80000000;
 
-	.text : AT(0x1000)
+	.text 0x80000400 : AT(0x1000)
 	{
 		KEEP(*(.text.entry))
 		*(.text .text.*)
+
+		. = ALIGN(16);
+		__ivt_start = .;
+
+		KEEP(*(.ivt))
+
+		__ivt_end = .;
 	}
 
 	.rodata ALIGN(16) : AT(ALIGN(LOADADDR(.text) + SIZEOF(.text), 16))
@@ -38,7 +44,7 @@ SECTIONS
 
 	.sdata ALIGN(16) : AT(ALIGN(LOADADDR(.data) + SIZEOF(.data), 16))
 	{
-		__gp = . + 0x7ff0;
+		__gp = . + 0x8000;
 
 		*(.sdata .sdata.*)
 

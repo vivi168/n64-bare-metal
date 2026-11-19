@@ -10,7 +10,7 @@ LDFLAGS := -m elf32btsmip -T n64.ld
 
 BUILD   := build
 ROM     := $(BUILD)/homebrew.z64
-OBJS    := $(BUILD)/n64_header.o $(BUILD)/boot.o $(BUILD)/test.o
+OBJS    := $(BUILD)/n64_header.o $(BUILD)/boot.o $(BUILD)/test.o $(BUILD)/interrupt.o
 
 .PHONY: all clean
 all: $(ROM)

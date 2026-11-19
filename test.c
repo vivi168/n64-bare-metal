@@ -1,10 +1,14 @@
 #include <stdint.h>
+#include <stddef.h>
 
 #define SCREEN_W 320
 #define SCREEN_H 240
 
+#define KSEG0_BASE 0x80000000
+#define KSEG1_BASE 0xA0000000
 #define PHYSADDR(a) ((uint32_t)(a) & 0x1FFFFFFF)
-#define VIRTADDR(a) ((uint32_t)(a) | 0xA0000000)
+#define KSEG0ADDR(a) (PHYSADDR(a) | KSEG0_BASE)
+#define KSEG1ADDR(a) (PHYSADDR(a) | KSEG1_BASE)
 
 #define REG32(a) ((volatile uint32_t *)(a))
 
@@ -67,7 +71,62 @@
 
 #define MI_BASE 0xA4300000
 #define MI_INTR REG32(MI_BASE + 0x08)
-#define MI_INTR_VI 0x08
+#define MI_MASK REG32(MI_BASE + 0x0C)
+
+// Interrupt bits
+#define MI_INTR_SP (1 << 0) // RSP Task done
+#define MI_INTR_SI (1 << 1) // controller input available
+#define MI_INTR_AI (1 << 2) // audio buffer swap
+#define MI_INTR_VI (1 << 3) // vertical retrace
+#define MI_INTR_PI (1 << 4) // ROM > RAM DMA done
+#define MI_INTR_DP (1 << 5) // RDP done (Full_Sync)
+
+// Cache related
+#define I_CACHE          0
+#define I_CACHE_SIZE     16384
+#define I_CACHE_LINESIZE 32
+
+#define D_CACHE          1
+#define D_CACHE_SIZE     8192
+#define D_CACHE_LINESIZE 16
+
+#define INDEX_INVALIDATE         0
+#define HIT_INVALIDATE           4
+#define HIT_WRITEBACK_INVALIDATE 5
+#define HIT_WRITEBACK            6
+
+#define D_HIT_INVALIDATE (D_CACHE | (HIT_INVALIDATE << 2))
+#define D_HIT_WRITEBACK (D_CACHE | (HIT_WRITEBACK << 2))
+#define D_INDEX_WRITEBACK_INVALIDATE (D_CACHE | (INDEX_WRITEBACK_INVALIDATE << 2))
+#define D_HIT_WRITEBACK_INVALIDATE (D_CACHE | (HIT_WRITEBACK_INVALIDATE << 2))
+
+#define I_INDEX_INVALIDATE (I_CACHE | (INDEX_INVALIDATE << 2))
+#define I_HIT_INVALIDATE (I_CACHE | (HIT_INVALIDATE << 2))
+
+#define CACHE_OP(op, addr) asm volatile("cache %0, 0(%1)" :: "i"(op), "r"(addr) : "memory")
+
+void invalid_i_cache(void *addr, uint32_t nbytes)
+{
+    if (nbytes == 0) {
+        return;
+    }
+
+    if (nbytes >= I_CACHE_SIZE) {
+        for (uint32_t a = KSEG0_BASE; a < KSEG0_BASE + I_CACHE_SIZE; a += I_CACHE_LINESIZE) {
+            CACHE_OP(I_INDEX_INVALIDATE, a);
+        }
+
+		return;
+    }
+
+    uint32_t vaddr = KSEG0ADDR(addr);
+    uint32_t start = vaddr & ~(I_CACHE_LINESIZE - 1); // align down to cache line size
+    uint32_t end = (vaddr + nbytes + I_CACHE_LINESIZE - 1) & ~(I_CACHE_LINESIZE - 1); // align up to cache line size
+
+    for (uint32_t a = start; a < end; a += I_CACHE_LINESIZE) {
+        CACHE_OP(I_HIT_INVALIDATE, a);
+    }
+}
 
 static _Alignas(8) uint32_t PIF_Init[] = {
 	0xFF010401, 0, // controller 1
@@ -105,6 +164,35 @@ struct JoyState
     int32_t x_axis : 8;
     int32_t y_axis : 8;
 };
+
+void *memcpy(void *d, const void *s, size_t n)
+{
+	uint8_t *dest = (uint8_t *)d;
+	const uint8_t *src = (const uint8_t *)s;
+
+	while (n--) {
+		*dest++ = *src++;
+	}
+
+	return dest;
+}
+
+extern void init_interrupts(void);
+extern void enable_interrupts(void);
+extern void disable_interrupts(void);
+
+extern uint8_t __ivt_start[], __ivt_end[], __ivt_ram_start[];
+
+static void install_interrupts(void)
+{
+	void *start = (void *)KSEG1ADDR(__ivt_ram_start);
+
+	uint32_t ivt_size = __ivt_end - __ivt_start;
+
+	memcpy(start, __ivt_start, ivt_size);
+
+	invalid_i_cache(start, ivt_size);
+}
 
 static void si_wait(void)
 {
@@ -179,7 +267,7 @@ void RDP_FillRectangle(uint32_t* cmd_list_dest, uint32_t x, uint32_t y, uint32_t
 	uint32_t hi = (0x36 << 24) | (xl << 12) | yl;
 	uint32_t lo = (xh << 12) | yh;
 
-	volatile uint32_t *p = (volatile uint32_t *)VIRTADDR(cmd_list_dest);
+	volatile uint32_t *p = (volatile uint32_t *)KSEG1ADDR(cmd_list_dest);
 
 	p[0] = hi;
 	p[1] = lo;
@@ -192,6 +280,9 @@ float ronre(float i, float j) {
 
 void main(void)
 {
+	install_interrupts();
+	init_interrupts();
+
 	si_wait(); // acknowledge the interrupt emited by PIF initialize in boot.S
 	vi_init();
 	init_joypad();
@@ -206,13 +297,17 @@ void main(void)
 	float rire = ronre(13.37f, 26.52f);
 	*(volatile uint32_t *)ISSOU = *(uint32_t *) &rire;
 
+	{
+		enable_interrupts();
+	}
+
 	for (;;) {
 		wait_vblank();
 
 		poll_joypad();
 
 		// PIF_JoyState is written via DMA so we must read the uncached version (via KSEG1)
-		volatile struct JoyState *js = (volatile struct JoyState *)VIRTADDR(&PIF_JoyState[1]);
+		volatile struct JoyState *js = (volatile struct JoyState *)KSEG1ADDR(&PIF_JoyState[1]);
 		if (js->d_up) {
 			ry--;
 		}
@@ -228,6 +323,9 @@ void main(void)
 
 		if (rx < 0) {
 			rx = 0;
+			// enable VBLANK Interrupt when we reach left border
+			// should block the game and set $k0 to DEADC0DE
+			*MI_MASK = MI_INTR_VI;
 		}
 		if (rx > (int32_t)(SCREEN_W - rw)) {
 			rx = SCREEN_W - rw;
