@@ -256,6 +256,15 @@ static void vi_init(void)
 	*VI_Y_SCALE = 1024; // Y_SCALE=1 (2.10 format)
 }
 
+void RDP_SetFillColor(uint32_t* cmd_list_dest, uint8_t r, uint8_t g, uint8_t b)
+{
+	uint16_t c = ((b >> 3) << 1) | ((g >> 3) << 6) | ((r >> 3) << 11);
+	volatile uint32_t *p = (volatile uint32_t *)KSEG1ADDR(cmd_list_dest);
+
+	p[0] = 0x37 << 24;
+	p[1] = (c << 16) | c;
+}
+
 void RDP_FillRectangle(uint32_t* cmd_list_dest, uint32_t x, uint32_t y, uint32_t width, uint32_t height)
 {
 	// top left corner, u10.2
@@ -272,6 +281,149 @@ void RDP_FillRectangle(uint32_t* cmd_list_dest, uint32_t x, uint32_t y, uint32_t
 
 	p[0] = hi;
 	p[1] = lo;
+}
+
+struct Vec2i
+{
+	int32_t x;
+	int32_t y;
+};
+
+/*
+fill triangle
+word0
+    hi
+        24    cmd (0x8)
+        23    lmajor (0) right major (1)
+        ..19  mip count - 1 (3 bits)
+        ..16  tile desc index (3 bits)
+        ..0   YL (s11.2) (14 bits)
+    lo
+        ..16  YM (s11.2) (14 bits)
+        ..0   YH (s11.2) (14 bits)
+
+word1
+    hi
+        ..16  XL.i (s11.16) (12 bits)
+        ..0   XL.f (s11.16) (16 bits)
+    lo
+        ..16  dxLdy.i (s13.16) (14 bits)
+        ..0   dxLdy.f (s13.16) (16 bits)
+
+word2
+    hi
+        ..16  XH.i (s11.16) (12 bits)
+        ..0   XH.f (s11.16) (16 bits)
+    lo
+        ..16  dxHdy.i (s13.16) (14 bits)
+        ..0   dxHdy.f (s13.16) (16 bits)
+
+word3
+    hi
+        ..16  XM.i (s11.16) (12 bits)
+        ..0   XM.f (s11.16) (16 bits)
+    lo
+        ..16  dxMdy.i (s13.16) (14 bits)
+        ..0   dxMdy.f (s13.16) (16 bits)
+*/
+// FIXME: for now assume vertex are aligned to pixel top left corner / no subpixel resolution
+void RDP_FillTriangle(uint32_t* cmd_list_dest, struct Vec2i v1, struct Vec2i v2, struct Vec2i v3)
+{
+	uint32_t word0_hi = (0x8 << 24);
+	uint32_t word0_lo;
+
+	uint32_t word1_hi;
+	uint32_t word1_lo;
+
+	uint32_t word2_hi;
+	uint32_t word2_lo;
+
+	uint32_t word3_hi;
+	uint32_t word3_lo;
+
+	// 1. sort vertices by Y
+	if (v2.y < v1.y) {
+		struct Vec2i tmp = v1;
+		v1 = v2;
+		v2 = tmp;
+	}
+
+	if (v3.y < v1.y) {
+		struct Vec2i tmp = v1;
+		v1 = v3;
+		v3 = tmp;
+	}
+
+	if (v3.y < v2.y) {
+		struct Vec2i tmp = v2;
+		v2 = v3;
+		v3 = tmp;
+	}
+
+	// 2. determine lmajor
+	uint32_t lmajor = v2.x > v1.x;
+
+	// 3. coordinates
+	// YL
+	word0_hi |= (lmajor << 23) | ((v3.y & 0xfff) << 2);
+
+	// YM | YH
+	word0_lo = (((v2.y & 0xfff) << 2) << 16) | ((v1.y & 0xfff) << 2);
+
+	// when vertices are rounded (no subpixel coord), XM = XH
+	word1_hi = (v2.x & 0xfff) << 16; // XL
+	word2_hi = (v1.x & 0xfff) << 16; // XH
+	word3_hi = (v1.x & 0xfff) << 16; // XM
+
+	// 4. compute slopes
+	const uint32_t SCALE = 0x10000; // 2**16
+	// DxLDy (v2,v3)
+	{
+		if (v2.y == v3.y) {
+			word1_lo = 0;
+		} else {
+			float dxdy = (float)(v3.x - v2.x) / (float)(v3.y - v2.y);
+			int32_t dxdy_i = dxdy * SCALE;
+			word1_lo = dxdy_i & 0x3fffffff;
+		}
+	}
+	// DxHDy (v1,v3)
+	{
+		if (v1.y == v3.y) {
+			word2_lo = 0;
+		} else {
+			float dxdy = (float)(v3.x - v1.x) / (float)(v3.y - v1.y);
+			int32_t dxdy_i = dxdy * SCALE;
+
+			word2_lo = dxdy_i & 0x3fffffff;
+		}
+	}
+	// DxMDy (v1,v2)
+	{
+		if (v1.y == v2.y) {
+			word3_lo = 0;
+		} else {
+			float dxdy = (float)(v2.x - v1.x) / (float)(v2.y - v1.y);
+			int32_t dxdy_i = dxdy * SCALE;
+
+			word3_lo = dxdy_i & 0x3fffffff;
+		}
+	}
+
+	//
+
+	volatile uint32_t *p = (volatile uint32_t *)KSEG1ADDR(cmd_list_dest);
+	p[0] = word0_hi;
+	p[1] = word0_lo;
+
+	p[2] = word1_hi;
+	p[3] = word1_lo;
+
+	p[4] = word2_hi;
+	p[5] = word2_lo;
+
+	p[6] = word3_hi;
+	p[7] = word3_lo;
 }
 
 // FPU test
@@ -299,7 +451,8 @@ void main(void)
 	*(volatile uint32_t *)ISSOU = *(uint32_t *) &rire;
 
 	{
-		enable_interrupts();
+		// enable_interrupts();
+		*MI_MASK = 0x0800; // DP full sync
 	}
 
 	for (;;) {
@@ -346,13 +499,42 @@ void main(void)
 				0x3f10013f, 0x00100000, // Set_Color_Image
 				0x37000000, 0xf83ff83f, // Set_Fill_Color
 				0x364fc3bc, 0x00000000, // Fill_Rectangle
-				0x37000000, 0x4bb54bb5, // Set_Fill_Color
+
+				// left major
+				0x00000000, 0x00000000, // Set_Fill_Color placeholder (NOOP)
+				0x00000000, 0x00000000, // Fill_Triangle placeholder (NOOP)
+				0x00000000, 0x00000000, // Fill_Triangle placeholder (NOOP)
+				0x00000000, 0x00000000, // Fill_Triangle placeholder (NOOP)
+				0x00000000, 0x00000000, // Fill_Triangle placeholder (NOOP)
+
+				// right major
+				0x00000000, 0x00000000, // Set_Fill_Color placeholder (NOOP)
+				0x00000000, 0x00000000, // Fill_Triangle placeholder (NOOP)
+				0x00000000, 0x00000000, // Fill_Triangle placeholder (NOOP)
+				0x00000000, 0x00000000, // Fill_Triangle placeholder (NOOP)
+				0x00000000, 0x00000000, // Fill_Triangle placeholder (NOOP)
+
+				0x00000000, 0x00000000, // Set_Fill_Color placeholder (NOOP)
 				0x00000000, 0x00000000, // Fill_Rectangle placeholder (NOOP)
+
 				0x29000000, 0x00000000, // Sync_Full
 			};
 
+			RDP_SetFillColor(&command_buffer[10], 0xff, 0x80, 0x40);
+			RDP_FillTriangle(&command_buffer[12],
+					(struct Vec2i){276, 100},
+					(struct Vec2i){118, 26},
+					(struct Vec2i){81, 216}
+					);
+			RDP_SetFillColor(&command_buffer[20], 0x55, 0xaa, 0xaa);
+			RDP_FillTriangle(&command_buffer[22],
+					(struct Vec2i){202, 33},
+					(struct Vec2i){157, 212},
+					(struct Vec2i){73, 71}
+					);
 			// in cycle_type = FILL and COPY modes, bot right corner coords are inclusive, so -1
-			RDP_FillRectangle(&command_buffer[12], rx, ry, rw, rh);
+			RDP_SetFillColor(&command_buffer[30], 0x4a, 0x73, 0xd5);
+			RDP_FillRectangle(&command_buffer[32], rx, ry, rw, rh);
 
 			*DPC_START = PHYSADDR(command_buffer);
 			*DPC_END = PHYSADDR(command_buffer) + sizeof(command_buffer);
