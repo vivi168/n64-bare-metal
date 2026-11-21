@@ -361,7 +361,11 @@ void RDP_FillTriangle(uint32_t* cmd_list_dest, struct Vec2i v1, struct Vec2i v2,
 	}
 
 	// 2. determine lmajor
-	uint32_t lmajor = v2.x > v1.x;
+	int32_t cross = (v2.x - v1.x) * (v3.y - v1.y) - (v3.x - v1.x) * (v2.y - v1.y);
+	if (cross == 0) {
+		return; // degenerate
+	}
+	uint32_t lmajor = cross > 0;
 
 	// 3. coordinates
 	// YL
