@@ -107,25 +107,26 @@
 
 void invalid_i_cache(void *addr, uint32_t nbytes)
 {
-    if (nbytes == 0) {
-        return;
-    }
+	if (nbytes == 0) {
+		return;
+	}
 
-    if (nbytes >= I_CACHE_SIZE) {
-        for (uint32_t a = KSEG0_BASE; a < KSEG0_BASE + I_CACHE_SIZE; a += I_CACHE_LINESIZE) {
-            CACHE_OP(I_INDEX_INVALIDATE, a);
-        }
+	// trash everything if nbytes is big
+	if (nbytes >= I_CACHE_SIZE) {
+		for (uint32_t a = KSEG0_BASE; a < KSEG0_BASE + I_CACHE_SIZE; a += I_CACHE_LINESIZE) {
+			CACHE_OP(I_INDEX_INVALIDATE, a);
+		}
 
 		return;
-    }
+	}
 
-    uint32_t vaddr = KSEG0ADDR(addr);
-    uint32_t start = vaddr & ~(I_CACHE_LINESIZE - 1); // align down to cache line size
-    uint32_t end = (vaddr + nbytes + I_CACHE_LINESIZE - 1) & ~(I_CACHE_LINESIZE - 1); // align up to cache line size
+	uint32_t vaddr = KSEG0ADDR(addr);
+	uint32_t start = vaddr & ~(I_CACHE_LINESIZE - 1); // align down to cache line size
+	uint32_t end = (vaddr + nbytes + I_CACHE_LINESIZE - 1) & ~(I_CACHE_LINESIZE - 1); // align up to cache line size
 
-    for (uint32_t a = start; a < end; a += I_CACHE_LINESIZE) {
-        CACHE_OP(I_HIT_INVALIDATE, a);
-    }
+	for (uint32_t a = start; a < end; a += I_CACHE_LINESIZE) {
+		CACHE_OP(I_HIT_INVALIDATE, a);
+	}
 }
 
 static _Alignas(8) uint32_t PIF_Init[] = {
